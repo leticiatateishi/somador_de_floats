@@ -25,7 +25,35 @@ int is_number(char c){
   		return 0;
 }
 
-/*	Retorna o estado (0-4) da máquina de estados após a inclusão do char c.
+int remove_zeros(char* number){
+	char c;
+	int pointer = 0;
+	int non_zero = 0;
+
+	/*	Ignoramos os números antes do ponto.
+	*/
+	while (number[pointer] != '\0' && number[pointer] != '.')
+		pointer++;
+
+	/*	Analisamos os números que seguem o ponto e armazenamos em non_zero a 
+	 *	posição do último dígito diferente de zero, para indicar a partir de 
+	 *	qual posição da string os zeros à direita são desnecessários.
+	 */
+	if (number[pointer] == '.'){
+		non_zero = pointer-1;
+		pointer ++;
+		while (number[pointer] != '\0'){
+			if (number[pointer] != '0')
+				non_zero = pointer;
+			pointer++;
+		}
+		return non_zero;
+	}
+
+	return pointer;
+}
+
+/*	Retorna o estado (0-6) da máquina de estados após a inclusão do char c.
  */
 int operate_fsm(Fsm *machine, char c) {
 
@@ -33,18 +61,21 @@ int operate_fsm(Fsm *machine, char c) {
 
 	switch (this_fsm->state) {
 
-		/*	Iniciamos no estado zero, onde permacemos até achar um espaço (que 
-		 *	nos leva ao estado 1) ou um dígito (estado 2).
+		/*	Iniciamos no estado zero. Vamos para o estado 2 se o primeiro char
+		 *	da string for um número, pro estado 1 se for um espaço ou para o 
+		 *	estado 5 se for uma letra ou ponto.
 		 */
 	    case 0:
 	      	if (is_number(c))
 	        	this_fsm->state = 2;
 	        else if (c == ' ')
 	        	this_fsm->state = 1;
+	        else
+	        	this_fsm->state = 5;
 		    break;
 
 		/* 	Ao encontrarmos um espaço, vamos para o estado 1, onde 
- 		 *	permanecemos até achar uma letra (nesse caso, retornamos ao 0) 
+ 		 *	permanecemos até achar uma letra/ponto (nesse caso, retornamos ao 0)
  		 *	ou um número (e vamos para o estado 2).
  		 */
 	    case 1:
@@ -55,28 +86,57 @@ int operate_fsm(Fsm *machine, char c) {
 	      	break;
 
 	    /*	Ao encontrarmos um número, permanecemos no estado 2 enquanto o char
-	     *	c for número ou ponto, ou seja, enquanto formar um float ou um 
-	     *	inteiro válido. Se encontrarmos um espaço indicando o fim do número,
-	     *	vamos ao estado 4 para sinalizar que um número flutuante válido foi
-	     *	encontrado. Se encontrarmos uma letra, vamos para o estado 3, 
-	     *	sinalizando um número inválido (pois desconsideramos números 
-	     *	que estejam grudados em strings).
+	     *	c for número. Se encontrarmos um espaço indicando o fim do número,
+	     *	vamos ao estado 6 para sinalizar que um número inteiro válido foi
+	     *	encontrado. Se encontrarmos um ponto, vamos para o estado 3, para
+	     *	analisar um possível ponto flutuante. Se encontramos uma letra,
+	     *	vamos para o estado 5, sinalizando um número inválido (pois 
+	     *  desconsideramos números que estejam grudados em strings).
 	     */
 	    case 2:
 		  	if (c == ' ') 
-		    	this_fsm->state = 4;
-		    else if (!is_number(c) && c != '.')
+		    	this_fsm->state = 6;
+		    else if (c == '.')
 		    	this_fsm->state = 3;
+		    else if (!is_number(c))
+		    	this_fsm->state = 5;
 		  	break;
 
-		/*	O estado 3 é utilizado para indicar um número flutuante inválido.
-		 *	Portanto, permanecemos nele até encontrar um espaço.
+		/*	O estado 3 indica que o último char analisado era um ponto.
+		 *	Portanto, devemos aguardar um número após este ponto (e vamos para
+		 *	o estado 4). Caso contrário, vamos para o estado 5, sinalizando
+		 *	um número inválido.
 		 */
 		case 3:
-		  	if (c == ' ') 
-		    	this_fsm->state = 1;
+		  	if (is_number(c)) 
+		    	this_fsm->state = 4;
+		    else
+		    	this_fsm->state = 5;
 		  	break;
+
+		/*	O estado 4 indica que há um dígito após um ponto. Assim, 
+		 *	permanecemos nele enquanto char c for um dígito. Se c for um espaço,
+		 *	o estado 6 indicará que encontramos um número ponto flutuante 
+		 *	válido. Caso contrário, vamos ao estado 5, indicando um número não
+		 *	válido.
+		 */
+		case 4:
+			if (c == ' ')
+				this_fsm->state = 6;
+			else if (!is_number(c))
+				this_fsm->state = 5;
+			break;
+
+		/*	O estado 5 indica um número inválido (grudado em strings ou com 
+		 *	mais de um ponto, por exemplo. Permanecemos nele até encontrarmos
+		 *	um espaço.
+		 */
+		case 5:
+			if (c == ' ')
+				this_fsm->state = 1;
+			break;
   	}
+
   	return (this_fsm->state);
 }
 
@@ -109,31 +169,47 @@ int main(){
 	int pointer_number = 0;
 
 	while (string[pointer_string] != '\n') {
+
 		operate_fsm((void*) (&machine), string[pointer_string]);
-		printf("Char: %c, estado: %d\n", string[pointer_string], machine.state);
-		if (machine.state == 3){
+
+		/*	Se estivermos no estado 5, limpamos a string onde havíamo começado
+		 *	a armazenar um possível número ponto flutuante, pois ele não é mais
+		 *	válido.
+		 */
+		if (machine.state == 5){
 			string[0] = '\0';
 			pointer_number = 0;
 		}
-		if (machine.state == 2){
+
+		/*	Se estivermos entre os estados 2 e 4, armazenamos o char na string
+		 *	number, pois é um possível número válido.
+		 *	Se estivermos no último char da string e no estado 2 ou 4, saltamos
+		 *	para o estado 6, pois temos um número válido.
+		 */
+		if (machine.state >= 2 && machine.state <= 4){
 			number[pointer_number++] = string[pointer_string];
+			if (machine.state != 3 && string[pointer_string+1] == '\n')
+				machine.state = 6;
 		}
-	    if (machine.state == 4 || (string[pointer_string+1] == '\n' && machine.state == 2)) {
+
+		/*	No estado final, somamos o número encontrado na variável sum.
+		 */
+	    if (machine.state == 6) {
 	    	number[pointer_number++] = '\0';
-	    	printf("Achei um ponto flutuante: %s\n", &number);
 	    	sum += atof(number);
 	    	number[0] = '\0';
 	    	pointer_number = 0;
 	    	machine.state = 0;
 	    }
+
 	    pointer_string++;
 	}
 
-	printf("Soma: %f\n", sum);
+	/*	Removemos os zeros desnecessários à direita e imprimimos o resultado.
+	 */
+	char result[100];
+	sprintf(result, "%.6f", sum);
+	result[remove_zeros(result)+1] = '\0';
+	printf("%s\n", &result);
 
 }
-
-/*	TO-DO:
- *	- Considerar casos com vários pontos, sem espaço
- *	- Imprimir sem zeros desnecessários à direita em ponto flutuante
- */
